@@ -69,9 +69,14 @@ containers:
       start_period: 45m
 
   - name: "finite-private-limiter"
-    image: "ghcr.io/finitecomputer/private-limiter:2026-08-28.3@sha256:95e8d90cbb1de783e24ade348a30c44a802c3e5038b7c7045608ad0b41aa05b4"
+    image: "ghcr.io/finitecomputer/private-limiter:2026-08-28.5@sha256:67eca4b21d5c0dc731eb008af6ad4dfd76ad2a27ead72809ce40297dafed426a"
     restart: always
     env:
+      # DEGRADED ADMISSION (temporary, revert when the usage API recovers):
+      # admits only keys listed in the FINITE_ADMISSION_ALLOWLIST secret, no
+      # reservation, settlement skipped, x-finite-admission header on every
+      # response. Trade-offs and revert path: cutover ledger 2026-08-28.
+      - FINITE_ADMISSION_MODE: "allowlist"
       - LISTEN_ADDR: "0.0.0.0:8002"
       - FINITE_USAGE_API_URL: "https://finite.computer"
       - UPSTREAM_BASE_URL: "http://glm-5-3-flash:8001"
@@ -89,6 +94,7 @@ containers:
     secrets:
       - FINITE_USAGE_API_SERVICE_KEY
       - VLLM_INTERNAL_API_KEY
+      - FINITE_ADMISSION_ALLOWLIST
     networks: [model-net, core-api]
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8002/live"]
