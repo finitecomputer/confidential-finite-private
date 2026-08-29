@@ -1,6 +1,18 @@
-# Release-ready source for the model-independent `finite-private` Tinfoil
-# container. The checkpoint, modelwrap artifact, and Finite images are pinned
-# to immutable identities for the authorized 2026-08-28 production window.
+# TEMPORARY overlay. Not the production-default candidate.
+#
+# Intended live tag: v2026-08-28-glm-5-3-flash-3. Same GLM checkpoint and
+# SGLang image as the candidate; DSA backends are the measured H200 pair
+# (flashmla_sparse / fa3). Deltas from the candidate are the limiter image
+# that carries fill-if-absent reasoning_effort=high, FINITE_ADMISSION_MODE=
+# allowlist, and the FINITE_ADMISSION_ALLOWLIST secret. Usage admission on
+# finite.computer is still missing (POST /internal/finite-private/v1/reservations
+# redirects to the homepage).
+#
+# Trade-off, revert, and mature path:
+#   docs/runs/glm-5-3-flash-degraded-admission.md
+# Do not promote this file over the candidate. Revert by recreating the
+# container from v2026-08-28-glm-5-3-flash-1, or from a later measured
+# release that omits FINITE_ADMISSION_MODE (limiter default is usage-api).
 cvm-version: 0.10.8
 cpus: 32
 memory: 524288
@@ -38,9 +50,9 @@ containers:
         "--context-length",
         "393216",
         "--dsa-prefill-backend",
-        "tilelang",
+        "flashmla_sparse",
         "--dsa-decode-backend",
-        "tilelang",
+        "fa3",
         "--kv-cache-dtype",
         "bfloat16",
         "--moe-runner-backend",
@@ -69,13 +81,13 @@ containers:
       start_period: 45m
 
   - name: "finite-private-limiter"
-    image: "ghcr.io/finitecomputer/private-limiter:2026-08-28.5@sha256:67eca4b21d5c0dc731eb008af6ad4dfd76ad2a27ead72809ce40297dafed426a"
+    image: "ghcr.io/finitecomputer/private-limiter:2026-08-28.6@sha256:4746398277eeb7eb96994c40affff34cd070721dd7753596bf7571604c823461"
     restart: always
     env:
       # DEGRADED ADMISSION (temporary, revert when the usage API recovers):
       # admits only keys listed in the FINITE_ADMISSION_ALLOWLIST secret, no
       # reservation, settlement skipped, x-finite-admission header on every
-      # response. Trade-offs and revert path: cutover ledger 2026-08-28.
+      # response. See docs/runs/glm-5-3-flash-degraded-admission.md.
       - FINITE_ADMISSION_MODE: "allowlist"
       - LISTEN_ADDR: "0.0.0.0:8002"
       - FINITE_USAGE_API_URL: "https://finite.computer"
@@ -85,6 +97,8 @@ containers:
       # Existing issued Runtimes may send either historical label. The limiter
       # canonicalizes only these names; any other model fails before reserve.
       - FINITE_PRIVATE_MODEL_ALIASES: "deepseek-v4-flash-0731,glm-5-2"
+      - FINITE_PRIVATE_DEFAULT_REASONING_EFFORT: "high"
+      - FINITE_PRIVATE_DEFAULT_ENABLE_THINKING: "true"
       - DASHBOARD_URL: "https://finite.computer/dashboard"
       - READINESS_TIMEOUT_SECS: "5"
       - FINITE_USAGE_API_TIMEOUT_SECS: "15"
