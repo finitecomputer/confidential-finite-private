@@ -1,15 +1,17 @@
-# Release-ready source for the model-independent `finite-private` Tinfoil
-# container. The checkpoint, modelwrap artifact, and Finite images are pinned
-# to immutable identities for the authorized 2026-08-28 production window.
-cvm-version: 0.10.8
+# Maintenance test candidate for 2026-09-16 03:00 America/Chicago.
+# Derived from Tinfoil V4.1 v0.0.3 and the exact live GLM flash-5 release.
+# Preparation only: this config has not been measured or run on our H200s.
+# See infra/runbooks/finite-private-deepseek-v41-test.md before release/use.
+cvm-version: 0.14.6
 cpus: 32
 memory: 524288
 gpus: 8
 
 models:
-  - name: "glm-5-3-flash"
-    repo: "zai-org/GLM-5.3-Flash@04c4e9e95c5da8862dced7e5056455116f83a7e0"
-    mpk: "54b2859aba423589c0d0d3bf48af25016c03d3b77db366a9061661e2df85ed79_328366215168_20a7ed6c-fd6a-54cb-98b4-8bfea86f829c"
+  - name: "deepseek-v4-1-flash"
+    repo: "deepseek-ai/DeepSeek-V4.1-Flash@dba1be0a40aa45a94ad051997016db3960a90277"
+    mpk: "159977c3efb94d1eba09025f71af1d1d55d6a58c58e4165b4587ec83166fa385_510313381888_27d8d4f7-446a-5f31-ae99-2339b36c2dde"
+    schema: 2
 
 networks:
   model-net: {}
@@ -19,56 +21,72 @@ networks:
       - finite.computer
 
 containers:
-  - name: "glm-5-3-flash"
-    image: "ghcr.io/finitecomputer/glm-5-3-flash-sglang:2026-08-28.3@sha256:91f614789cedf42a4d332fa8c4744eebf5067ba953b546823cec389169ee8008"
+  - name: "deepseek-v4-1-flash"
+    image: "ghcr.io/tinfoilsh/confidential-deepseek-v4-1-flash@sha256:fd77a686a50cc854424a55d6222530e6d5197d9b2f999ede32019b5dfd0ea9c0" # v0.0.3
     runtime: nvidia
     gpus: all
-    ipc: host
     restart: always
+    networks: [model-net]
+    secrets: [VLLM_API_KEY]
+    env:
+      - PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"
+      - VLLM_ALLREDUCE_USE_SYMM_MEM: "0"
+      - VLLM_ALLREDUCE_USE_FLASHINFER: "0"
+      - FLASHINFER_NO_DOWNLOAD: "1"
+      - NUMBA_CACHE_DIR: "/root/numba-cache"
+      - VLLM_ENGINE_READY_TIMEOUT_S: "3600"
     command:
       [
-        "--model-path",
-        "/tinfoil/mpk/mpk-54b2859aba423589c0d0d3bf48af25016c03d3b77db366a9061661e2df85ed79",
-        "--served-model-name",
-        "glm-5-3-flash",
-        "--tp-size",
+        "--model",
+        "/tinfoil/mpk/mpk-159977c3efb94d1eba09025f71af1d1d55d6a58c58e4165b4587ec83166fa385",
+        "--tokenizer-mode",
+        "deepseek_v41",
+        "--tensor-parallel-size",
         "8",
-        "--ep-size",
-        "8",
-        "--context-length",
-        "393216",
-        "--chunked-prefill-size",
-        "16384",
-        "--dsa-prefill-backend",
-        "flashmla_sparse",
-        "--dsa-decode-backend",
-        "fa3",
-        "--kv-cache-dtype",
-        "bfloat16",
-        "--moe-runner-backend",
-        "deep_gemm",
-        "--reasoning-parser",
-        "glm45",
-        "--tool-call-parser",
-        "glm47",
+        "--language-model-only",
         "--host",
         "0.0.0.0",
+        "--engram-config",
+        '{"cpu_offload":false}',
+        "--tool-call-parser",
+        "deepseek_v41",
+        "--enable-auto-tool-choice",
+        "--reasoning-parser",
+        "deepseek_v41",
+        "--enable-force-include-usage",
+        "--enable-prompt-tokens-details",
+        "--served-model-name",
+        "deepseek-v4-1-flash",
+        "--scheduling-policy",
+        "priority",
         "--port",
         "8001",
+        "--disable-custom-all-reduce",
+        "--compilation-config",
+        '{"mode":0,"cudagraph_mode":"FULL_DECODE_ONLY","pass_config":{"fuse_allreduce_rms":false}}',
+        "--max-model-len",
+        "393216",
+        "--max-num-batched-tokens",
+        "8192",
+        "--max-cudagraph-capture-size",
+        "512",
+        "--gpu-memory-utilization",
+        "0.85",
+        "--max-num-seqs",
+        "64",
+        "--speculative-config",
+        '{"method":"dspark","num_speculative_tokens":5,"draft_sample_method":"probabilistic","rejection_sample_method":"block","enable_adaptive_verification":true}',
+        "--override-generation-config",
+        '{"temperature":1.0,"top_p":0.95}',
       ]
     tmpfs:
-      /tmp: size=512m,mode=1777,exec
+      /tmp: size=16g,mode=1777,exec
       /root: size=20g,mode=0700,exec
-    networks: [model-net]
-    secrets:
-      # Historical secret name retained so the replacement can reuse the
-      # current sealed value. The wrapper passes it to SGLang's --api-key.
-      - VLLM_API_KEY
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8001/health"]
       interval: 30s
       timeout: 5s
-      start_period: 45m
+      start_period: 120m
 
   - name: "finite-private-limiter"
     image: "ghcr.io/finitecomputer/private-limiter:2026-08-28.6@sha256:4746398277eeb7eb96994c40affff34cd070721dd7753596bf7571604c823461"
@@ -76,14 +94,14 @@ containers:
     env:
       - LISTEN_ADDR: "0.0.0.0:8002"
       - FINITE_USAGE_API_URL: "https://finite.computer"
-      - UPSTREAM_BASE_URL: "http://glm-5-3-flash:8001"
-      - FINITE_PRIVATE_MODEL: "glm-5-3-flash"
-      - FINITE_PRIVATE_UPSTREAM_MODEL: "glm-5-3-flash"
+      - UPSTREAM_BASE_URL: "http://deepseek-v4-1-flash:8001"
+      - FINITE_PRIVATE_MODEL: "deepseek-v4-1-flash"
+      - FINITE_PRIVATE_UPSTREAM_MODEL: "deepseek-v4-1-flash"
       # Existing issued Runtimes may send either historical label. The dotted
       # Z.ai spelling is accepted as an alias; the served name stays hyphenated.
       # The limiter canonicalizes only these names; any other model fails
       # before reserve.
-      - FINITE_PRIVATE_MODEL_ALIASES: "deepseek-v4-flash-0731,glm-5-2,glm-5.3-flash"
+      - FINITE_PRIVATE_MODEL_ALIASES: "glm-5-3-flash,deepseek-v4-flash-0731,glm-5-2,glm-5.3-flash"
       - FINITE_PRIVATE_DEFAULT_REASONING_EFFORT: "high"
       - FINITE_PRIVATE_DEFAULT_ENABLE_THINKING: "true"
       - DASHBOARD_URL: "https://finite.computer/dashboard"
